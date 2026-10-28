@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import ssl
 from dataclasses import dataclass
+from http.client import HTTPException, IncompleteRead
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -52,14 +54,41 @@ class UrllibTransport:
                     headers=dict(response.headers.items()),
                 )
         except HTTPError as error:
-            # HTTP errors are still HTTP responses; callers can inspect their status.
+            # 4xx/5xx are still HTTP responses: the status is what callers and the retry
+            # policy act on, so report it even if the body cannot be read completely.
             return HTTPResponse(
                 status_code=error.code,
-                body=error.read(),
+                body=_read_body_best_effort(error),
                 headers=dict(error.headers.items()) if error.headers else {},
             )
-        except (URLError, TimeoutError, OSError) as error:
-            raise TransportError(f"HTTP request failed: {error}") from error
+        except (URLError, TimeoutError, OSError, HTTPException) as error:
+            # URLError: DNS, connection refused, and timeouts/TLS failures during connect.
+            # OSError: connection reset or closed before any response (RemoteDisconnected).
+            # HTTPException: malformed status line, truncated body (BadStatusLine,
+            # IncompleteRead). All are transport failures; only TLS ones are permanent.
+            raise TransportError(
+                f"HTTP request failed: {error}", retryable=not _is_tls_failure(error)
+            ) from error
+
+
+def _read_body_best_effort(error: HTTPError) -> bytes:
+    try:
+        return error.read()
+    except IncompleteRead as partial:
+        return partial.partial
+    except (OSError, HTTPException):
+        return b""
+
+
+def _is_tls_failure(error: BaseException) -> bool:
+    """Whether ``error`` is a TLS handshake or certificate problem.
+
+    ``urllib`` usually wraps these in ``URLError`` with the ``ssl`` error as ``reason``.
+    Such failures are deterministic, so retrying them only delays surfacing the problem.
+    """
+    return isinstance(error, ssl.SSLError) or isinstance(
+        getattr(error, "reason", None), ssl.SSLError
+    )
 
 
 def encode_json(payload: dict[str, object]) -> bytes:

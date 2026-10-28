@@ -10,4 +10,15 @@ class ConfigurationError(WebhookDeliveryError, ValueError):
 
 
 class TransportError(WebhookDeliveryError):
-    """Raised when an HTTP request cannot be completed at the transport layer."""
+    """Raised when an HTTP request cannot be completed at the transport layer.
+
+    ``retryable`` tells a retry policy whether another attempt could reasonably succeed.
+    Timeouts and connection failures are retryable; failures that will not change between
+    attempts, such as TLS certificate errors, should be raised with ``retryable=False``.
+    """
+
+    retryable: bool = True
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable

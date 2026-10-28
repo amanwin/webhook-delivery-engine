@@ -28,5 +28,8 @@ class WebhookEvent:
             raise TypeError("payload must be a dictionary")
         if not isinstance(self.headers, dict):
             raise TypeError("headers must be a dictionary")
-        if any(not isinstance(key, str) or not isinstance(value, str) for key, value in self.headers.items()):
+        if any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in self.headers.items()
+        ):
             raise TypeError("event headers must contain string keys and values")
